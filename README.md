@@ -1,5 +1,7 @@
 # fwmon — surveillance réseau par application
 
+**Français** · [English](README.en.md) · [العربية](README.ar.md)
+
 Petit outil en terminal, dans l'esprit d'une appliance pare-feu (Fortinet / FortiView) :
 il montre en temps réel **ce que chaque application fait sur le réseau** — sessions,
 sens du trafic (IN / OUT / LOCAL), débits, sites contactés, ports en écoute.
