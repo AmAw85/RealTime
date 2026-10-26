@@ -1,0 +1,129 @@
+#!/bin/sh
+# Controle de fwmon : start | show | stop | status
+# (alias : lancer | afficher | fermer | etat)
+#
+# L'application tourne dans une session "screen" detachee : fermer la fenetre
+# ne l'arrete pas, "afficher" la rouvre, "fermer" l'arrete proprement.
+set -eu
+
+here=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)
+SESSION=fwmon
+APP="$here/fwmon.sh"
+
+say() {
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a fwmon -i network-transmit-receive "fwmon" "$1" 2>/dev/null || true
+    fi
+    echo "fwmon : $1"
+}
+
+running() {
+    screen -ls 2>/dev/null | grep -Eq "[0-9]+[.]$SESSION[[:space:]]"
+}
+
+attached() {
+    screen -ls 2>/dev/null | grep -E "[0-9]+[.]$SESSION[[:space:]]" | grep -qi "attached"
+}
+
+find_terminal() {
+    for t in gnome-terminal konsole xfce4-terminal x-terminal-emulator xterm; do
+        if command -v "$t" >/dev/null 2>&1; then
+            echo "$t"
+            return 0
+        fi
+    done
+    return 1
+}
+
+open_window() {
+    term=$(find_terminal) || { say "aucun terminal graphique trouve"; return 1; }
+    case "$term" in
+        gnome-terminal)
+            exec gnome-terminal --title="fwmon" -- screen -U -A -dr "$SESSION" ;;
+        konsole)
+            exec konsole -p tabtitle="fwmon" -e screen -U -A -dr "$SESSION" ;;
+        xfce4-terminal)
+            exec xfce4-terminal --title="fwmon" -e "screen -U -A -dr $SESSION" ;;
+        *)
+            exec "$term" -T fwmon -e screen -U -A -dr "$SESSION" ;;
+    esac
+}
+
+start() {
+    if running; then
+        show
+        return
+    fi
+    screen -U -dmS "$SESSION" "$APP"
+    sleep 0.4
+    if ! running; then
+        say "le demarrage a echoue (voir : screen -ls)"
+        return 1
+    fi
+    show
+}
+
+show() {
+    if ! running; then
+        start
+        return
+    fi
+    if attached; then
+        say "deja affiche dans une autre fenetre"
+        return 0
+    fi
+    open_window
+}
+
+stop() {
+    if ! running; then
+        say "n'est pas lance"
+        return 0
+    fi
+    screen -S "$SESSION" -X quit 2>/dev/null || true
+    i=0
+    while running && [ "$i" -lt 30 ]; do
+        sleep 0.1
+        i=$((i + 1))
+    done
+    if running; then
+        screen -S "$SESSION" -X kill 2>/dev/null || true
+        sleep 0.3
+    fi
+    # Le collecteur root s'arrete dans le "finally" de l'interface : lui laisser un instant.
+    i=0
+    while pgrep -f "^[^ ]*python3 $here/fwmon/collector.py$" >/dev/null 2>&1 && [ "$i" -lt 30 ]; do
+        sleep 0.1
+        i=$((i + 1))
+    done
+    if pgrep -f "^[^ ]*python3 $here/fwmon/collector.py$" >/dev/null 2>&1; then
+        say "arrete, mais un collecteur root subsiste (verifier : pgrep -af collector.py)"
+        return 1
+    fi
+    say "arrete"
+}
+
+status() {
+    if running; then
+        if attached; then
+            echo "fwmon : en cours (affiche)"
+        else
+            echo "fwmon : en cours (detache)"
+        fi
+        screen -ls | grep -E "[0-9]+[.]$SESSION[[:space:]]"
+    else
+        echo "fwmon : arrete"
+    fi
+}
+
+case "${1:-help}" in
+    start|lancer)      start ;;
+    show|afficher)     show ;;
+    stop|fermer|close) stop ;;
+    status|etat)       status ;;
+    *)
+        echo "usage: fwmonctl start|show|stop|status"
+        echo "       (lancer|afficher|fermer|etat)"
+        exit 2
+        ;;
+esac
